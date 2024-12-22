@@ -1,0 +1,56 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  username String @id @db.VarChar(255)
+  email    String @unique @db.VarChar(255)
+  password String @db.VarChar(255)
+  name     String @db.VarChar(100)
+  role Role @default(USER)
+  token    String? @db.VarChar(500)
+  kos      Kos[]
+
+  @@map("users")
+}
+enum Role {
+  USER
+  ADMIN
+}
+
+model Kos {
+  id  Int @id @default(autoincrement())
+  nama_kos String @db.VarChar(100)
+  pemilik_kos String @db.VarChar(100)
+  alamat_kos String @db.VarChar(255)
+  description String?
+  image String
+  username String @db.VarChar(255)
+  user User @relation(fields: [username], references: [username])
+  kamar   Kamar[]
+
+  @@map("kos")
+}
+
+model Kamar {
+  id Int @id @default(autoincrement())
+  nomor_kamar String @db.VarChar(100)
+  harga Int
+  fasilitas String @db.VarChar(100)
+  image String
+  kos_id Int
+  kos Kos @relation(fields: [kos_id], references: [id])
+
+  @@map("kamars")
+}
