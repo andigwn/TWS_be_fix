@@ -2,22 +2,23 @@ import { prismaClient } from "../application/database.js";
 import { ResponseError } from "../error/response_error.js";
 import { createKosValidation, getKosValidation, searchKosValidation, updateKosValidation } from "../validation/kos_validation.js"
 import { validate } from "../validation/validation.js";
+import path from 'path';
+import fs from 'fs/promises';
 
 const create = async (user, request, images) => {
     const kos = validate(createKosValidation, request);
-    let imagesPaths;
+    let imagesPaths = [];
 
     // Handle both single and multiple images
-    if (Array.isArray(images)) {
-        imagesPaths = images.map(image => `${image.filename}`);
-    } else if (images) {
-        imagesPaths = [`${images.filename}`];
+    if (images) {
+        const filesArray = Array.isArray(images) ? images : [images];
+        imagesPaths = filesArray.map(image => `/uploads/images/${image.filename}`);
     } else {
         throw new ResponseError(400, "Image is required");
-        // atau berikan default image path
     }
-    kos.username = user.username
-    return await prismaClient.kos.create({
+
+    kos.username = user.username;
+    const result = await prismaClient.kos.create({
         data: { ...kos, image: JSON.stringify(imagesPaths) },
         select: {
             id: true,
@@ -27,7 +28,13 @@ const create = async (user, request, images) => {
             description: true,
             image: true
         }
-    })
+    });
+
+    // Parse the image JSON string before returning
+    if (result.image) {
+        result.image = JSON.parse(result.image);
+    }
+    return result;
 }
 
 const get = async (user, kosId) => {
@@ -46,41 +53,47 @@ const get = async (user, kosId) => {
             image: true
         }
     });
+
     if (!result) {
         throw new ResponseError(404, "Data not found");
+    }
+    if (result.image) {
+        result.image = JSON.parse(result.image);
     }
     return result;
 }
 
 const update = async (user, request, images) => {
     const kos = validate(updateKosValidation, request);
-    const totalKosInDatabase = await prismaClient.kos.count({
+    const existingKos = await prismaClient.kos.findFirst({
         where: {
             username: user.username,
             id: kos.id
         }
-    })
-    if (totalKosInDatabase !== 1) {
+    });
+
+    if (!existingKos) {
         throw new ResponseError(404, "Data not found");
     }
-    let imagesPaths = totalKosInDatabase.image ? JSON.parse(totalKosInDatabase.image) : [];
 
-    if (images && Array.isArray(images) && images.length > 0) {
+    let imagesPaths = existingKos.image ? JSON.parse(existingKos.image) : [];
+
+    if (images && images.length > 0) {
         // Delete old images
         try {
-            const oldImages = JSON.parse(totalKosInDatabase.image || '[]');
-            for (const oldImage of oldImages) {
-                const filePath = path.join(process.cwd(), 'public', oldImage);
+            for (const oldImagePath of imagesPaths) {
+                const filePath = path.join(process.cwd(), oldImagePath.replace(/^\//, ''));
                 await fs.unlink(filePath).catch(() => { });
             }
         } catch (error) {
-            logger('Error deleting old images:', error);
+            console.error('Error deleting old images:', error);
         }
 
         // Set new images
-        imagesPaths = images.map(image => `${image.filename}`);
+        imagesPaths = images.map(image => `/uploads/images/${image.filename}`);
     }
-    return await prismaClient.kos.update({
+
+    const updatedKos = await prismaClient.kos.update({
         where: {
             id: kos.id
         },
@@ -99,33 +112,49 @@ const update = async (user, request, images) => {
             description: true,
             image: true
         }
-    })
+    });
+
+    if (updatedKos.image) {
+        updatedKos.image = JSON.parse(updatedKos.image);
+    }
+    return updatedKos;
 }
 
 const remove = async (user, kosId) => {
     kosId = validate(getKosValidation, kosId);
-    const kosTotalInDatabase = await prismaClient.kos.count({
+    const existingKos = await prismaClient.kos.findFirst({
         where: {
             username: user.username,
-            id: kosId,
-
+            id: kosId
         }
-    })
-    if (kosTotalInDatabase !== 1) {
+    });
+
+    if (!existingKos) {
         throw new ResponseError(404, "Data not found");
+    }
+
+    // Delete associated images
+    if (existingKos.image) {
+        const images = JSON.parse(existingKos.image);
+        for (const image of images) {
+            try {
+                const filePath = path.join(process.cwd(), image.replace(/^\//, ''));
+                await fs.unlink(filePath).catch(() => { });
+            } catch (error) {
+                console.error('Error deleting image:', error);
+            }
+        }
     }
 
     return await prismaClient.kos.delete({
         where: {
             id: kosId
-        },
-    })
-
+        }
+    });
 }
-
 const search = async (request) => {
     request = validate(searchKosValidation, request);
-    const skip = (request.page - 1) * request.size
+    const skip = (request.page - 1) * request.size;
 
     const filters = [];
     if (request.nama_kos) {
@@ -133,22 +162,23 @@ const search = async (request) => {
             nama_kos: {
                 contains: request.nama_kos
             }
-        })
+        });
     }
     if (request.pemilik_kos) {
         filters.push({
             pemilik_kos: {
                 contains: request.pemilik_kos
             }
-        })
+        });
     }
     if (request.alamat_kos) {
         filters.push({
             alamat_kos: {
                 contains: request.alamat_kos
             }
-        })
+        });
     }
+
     const kos = await prismaClient.kos.findMany({
         where: {
             AND: filters,
@@ -157,11 +187,19 @@ const search = async (request) => {
         skip: skip,
     });
 
+    // Parse image JSON strings to arrays for all results
+    kos.forEach(item => {
+        if (item.image) {
+            item.image = JSON.parse(item.image);
+        }
+    });
+
     const totalItems = await prismaClient.kos.count({
         where: {
             AND: filters
         }
-    })
+    });
+
     return {
         data: kos,
         paging: {
@@ -169,7 +207,6 @@ const search = async (request) => {
             totalItems: totalItems,
             totalPage: Math.ceil(totalItems / request.size)
         }
-    }
+    };
 }
-
 export default { create, get, update, remove, search }

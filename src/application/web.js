@@ -8,6 +8,7 @@ export const web = express();
 
 web.use(express.json());
 web.use(cors());
+web.use("/uploads", express.static("uploads"));
 web.use(publicRouter)
 web.use(userRouter);  // error middleware must be at the end of the middleware chain.
 web.use(errorMiddleware);

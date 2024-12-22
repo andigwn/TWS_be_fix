@@ -3,6 +3,8 @@ import { ResponseError } from "../error/response_error.js";
 import { createKamarValidation, getKamarValidation, updateKamarValidation } from "../validation/kamar_validation.js";
 import { getKosValidation } from "../validation/kos_validation.js";
 import { validate } from "../validation/validation.js";
+import path from 'path';
+import fs from 'fs/promises';
 
 const checkKos = async (user, kosId) => {
     kosId = validate(getKosValidation, kosId);
@@ -22,18 +24,16 @@ const create = async (user, kosId, request, images) => {
     kosId = await checkKos(user, kosId);
     const kamar = validate(createKamarValidation, request);
     kamar.kos_id = kosId
-    let imagesPaths;
+    let imagesPaths = [];
 
     // Handle both single and multiple images
-    if (Array.isArray(images)) {
-        imagesPaths = images.map(image => `${image.filename}`);
-    } else if (images) {
-        imagesPaths = [`${images.filename}`];
+    if (images) {
+        const filesArray = Array.isArray(images) ? images : [images];
+        imagesPaths = filesArray.map(image => `/uploads/images/${image.filename}`);
     } else {
         throw new ResponseError(400, "Image is required");
-        // atau berikan default image path
     }
-    return await prismaClient.kamar.create({
+    const result = await prismaClient.kamar.create({
         data: { ...kamar, image: JSON.stringify(imagesPaths) },
         select: {
             id: true,
@@ -42,7 +42,11 @@ const create = async (user, kosId, request, images) => {
             fasilitas: true,
             image: true
         }
-    })
+    });
+    if (result.image) {
+        result.image = JSON.parse(result.image);
+    }
+    return result;
 }
 
 const get = async (user, kosId, kamarId) => {
@@ -63,6 +67,9 @@ const get = async (user, kosId, kamarId) => {
     });
     if (!result) {
         throw new ResponseError(404, "Data not found");
+    }
+    if (result.image) {
+        result.image = JSON.parse(result.image);
     }
     return result;
 }
@@ -98,7 +105,7 @@ const update = async (user, kosId, request, images) => {
         imagesPaths = images.map(image => `${image.filename}`);
     }
 
-    return await prismaClient.kamar.update({
+    const updatedKamar = await prismaClient.kamar.update({
         where: {
             id: kamar.id
         },
@@ -115,7 +122,11 @@ const update = async (user, kosId, request, images) => {
             fasilitas: true,
             image: true
         }
-    })
+    });
+    if (updatedKos.image) {
+        updatedKos.image = JSON.parse(updatedKos.image);
+    }
+    return updatedKos;
 }
 
 const remove = async (user, kosId, kamarId) => {
