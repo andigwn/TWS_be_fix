@@ -12,7 +12,7 @@ const create = async (user, request, images) => {
     // Handle both single and multiple images
     if (images) {
         const filesArray = Array.isArray(images) ? images : [images];
-        imagesPaths = filesArray.map(image => `/uploads/images/${image.filename}`);
+        imagesPaths = filesArray.map(image => `/uploads/images/${image.filename}`.replace(/\\/g, '/'));
     } else {
         throw new ResponseError(400, "Image is required");
     }

@@ -23,16 +23,16 @@ const checkKos = async (user, kosId) => {
 const create = async (user, kosId, request, images) => {
     kosId = await checkKos(user, kosId);
     const kamar = validate(createKamarValidation, request);
-    kamar.kos_id = kosId
     let imagesPaths = [];
 
     // Handle both single and multiple images
     if (images) {
         const filesArray = Array.isArray(images) ? images : [images];
-        imagesPaths = filesArray.map(image => `/uploads/images/${image.filename}`);
+        imagesPaths = filesArray.map(image => `/uploads/images/${image.filename}`.replace(/\\/, '/'));
     } else {
         throw new ResponseError(400, "Image is required");
     }
+    kamar.kos_id = kosId
     const result = await prismaClient.kamar.create({
         data: { ...kamar, image: JSON.stringify(imagesPaths) },
         select: {
@@ -43,6 +43,8 @@ const create = async (user, kosId, request, images) => {
             image: true
         }
     });
+
+    // Parse the image JSON string before returning
     if (result.image) {
         result.image = JSON.parse(result.image);
     }
@@ -89,20 +91,19 @@ const update = async (user, kosId, request, images) => {
     }
     let imagesPaths = totalKamarInDatabase.image ? JSON.parse(totalKamarInDatabase.image) : [];
 
-    if (images && Array.isArray(images) && images.length > 0) {
+    if (images && images.length > 0) {
         // Delete old images
         try {
-            const oldImages = JSON.parse(totalKamarInDatabase.image || '[]');
-            for (const oldImage of oldImages) {
-                const filePath = path.join(process.cwd(), 'public', oldImage);
+            for (const oldImagePath of imagesPaths) {
+                const filePath = path.join(process.cwd(), oldImagePath.replace(/^\//, ''));
                 await fs.unlink(filePath).catch(() => { });
             }
         } catch (error) {
-            logger('Error deleting old images:', error);
+            console.error('Error deleting old images:', error);
         }
 
         // Set new images
-        imagesPaths = images.map(image => `${image.filename}`);
+        imagesPaths = images.map(image => `/uploads/images/${image.filename}`);
     }
 
     const updatedKamar = await prismaClient.kamar.update({
@@ -123,10 +124,10 @@ const update = async (user, kosId, request, images) => {
             image: true
         }
     });
-    if (updatedKos.image) {
-        updatedKos.image = JSON.parse(updatedKos.image);
+    if (updatedKamar.image) {
+        updatedKamar.image = JSON.parse(updatedKamar.image);
     }
-    return updatedKos;
+    return updatedKamar;
 }
 
 const remove = async (user, kosId, kamarId) => {
@@ -141,6 +142,18 @@ const remove = async (user, kosId, kamarId) => {
     if (totalKamarInDatabase !== 1) {
         throw new ResponseError(404, "Data not found");
     }
+    if (totalKamarInDatabase.image) {
+        const images = JSON.parse(totalKamarInDatabase.image);
+        for (const image of images) {
+            try {
+                const filePath = path.join(process.cwd(), image.replace(/^\//, ''));
+                await fs.unlink(filePath).catch(() => { });
+            } catch (error) {
+                console.error('Error deleting image:', error);
+            }
+        }
+    }
+
     return await prismaClient.kamar.delete({
         where: {
             id: kamarId
